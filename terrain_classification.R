@@ -15,7 +15,7 @@ execGRASS('r.in.gdal', input="subbathy.tif",
 # should we aggregate the bathy at this point?
 
 ## set the region to the extent of the file
-execGRASS('g.region', rast='elev', flags=c('a','p'))                            # align cells with region extent
+execGRASS('g.region', raster='elev', res='20', flags=c('a','p'))                             # align cells with region extent
 
 ## calculate the smooth raster
 execGRASS('r.neighbors', input='elev', output='avg', size=as.integer(9),
@@ -30,33 +30,33 @@ execGRASS('r.neighbors', input='elev', output='max', size=as.integer(9),
 #Elevation-relief ratio  
 execGRASS('r.mapcalc', expression = 'er=1.0*(avg-min)/(max-min)', flags='overwrite') 
 
-gc()              
+gc()       
 
 #slope, and normalized slope, using the raster package
 execGRASS('r.out.gdal', type='Float64', input="elev", output='elev.tif', flags='overwrite')
 elev <- raster('elev.tif')
 slope<-terrain(elev,opt=c('slope'),unit='degrees')
-xslope<-slope/64.22344                                                          #divide by max slope
+xslope<-slope/74.82501              #divide by max slope
 
 #Profile curvature
 execGRASS('r.param.scale', input='elev', output='profc', size=as.integer(11),
-          s_tol=0.1, c_tol=0.0001, param='profc', exp=0.0, zscale=1.0, flags='overwrite')
+          slope_tolerance=0.1, curvature_tolerance=0.0001, method='profc', exponent=0.0, zscale=1.0, flags='overwrite')
 
 #Cross-sectional curvature 
 execGRASS('r.param.scale', input='elev', output='crosc', size=as.integer(11),
-          s_tol=0.1, c_tol=0.0001, param='crosc', exp=0.0, zscale=1.0, flags='overwrite')
+          slope_tolerance=0.1, curvature_tolerance=0.0001, method='crosc', exponent=0.0, zscale=1.0, flags='overwrite')
 
 #Minimum curvature
 execGRASS('r.param.scale', input='elev', output='minic', size=as.integer(11),
-          s_tol=0.1, c_tol=0.0001, param='minic', exp=0.0, zscale=1.0, flags='overwrite')
+          slope_tolerance=0.1, curvature_tolerance=0.0001, method='minic', exponent=0.0, zscale=1.0, flags='overwrite')
 
 #Maximum curvature
 execGRASS('r.param.scale', input='elev', output='maxic', size=as.integer(11),
-          s_tol=0.1, c_tol=0.0001, param='maxic', exp=0.0, zscale=1.0, flags='overwrite')
+          slope_tolerance=0.1, curvature_tolerance=0.0001, method='maxic', exponent=0.0, zscale=1.0, flags='overwrite')
 
 #Longitudinal curvature  
 execGRASS('r.param.scale', input='elev', output='longc', size=as.integer(11),
-          s_tol=0.1, c_tol=0.0001, param='longc', exp=0.0, zscale=1.0, flags='overwrite')                                                                                       
+          slope_tolerance=0.1, curvature_tolerance=0.0001, method='longc', exponent=0.0, zscale=1.0, flags='overwrite')                                                                                
 
 #export, import
 execGRASS('r.out.gdal', type='Float64', input="er", output='er.tif', flags='overwrite')
@@ -109,6 +109,5 @@ p <- predict(s, rf, type='response', progress='text')
 # customized plot (needs an extra library)
 #par(mar=c(0,0,0,0))
 #plot(p, maxpixels=50000, axes=FALSE, legend=FALSE, col=brewer.pal('Set1', n=5))
-
 
 writeRaster(p, "TerClass.asc")
