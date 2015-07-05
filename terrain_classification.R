@@ -1,85 +1,33 @@
-library(spgrass6)
+library(rgrass7)
 library(rgdal)
 library(raster)
 library(cluster)
 library(randomForest)
 
+
 loc <- initGRASS("/home/epilib/Envs/env1/grass-7.1.svn", home=tempdir())
 execGRASS('g.proj',epsg=as.integer(32633), location='utm_wgs84_33N')
-execGRASS('g.mapset', mapset='PERMANENT', location='utm_wgs84_33N') 
+execGRASS('g.mapset', mapset='PERMANENT', location='utm_wgs84_33N')
 
+# run only once ...
 ## create a raster for use in grass
-execGRASS('r.in.gdal', input="subbathy.tif",
-          flags=c('overwrite','o','e'), output='elev')                                  # o= override the prjection parameters, and e=extend the location
-
-# should we aggregate the bathy at this point?
+#execGRASS('r.in.gdal', input="bathy20_1.tif",
+#          flags=c('overwrite','o','e'), output='elev')     # o= override the prjection parameters, and e=extend the location
 
 ## set the region to the extent of the file
-execGRASS('g.region', raster='elev', res='20', flags=c('a','p'))                             # align cells with region extent
+#execGRASS('g.region', raster='elev', res='20', flags=c('a','p'))    # align cells with region extent
 
-## calculate the smooth raster
-execGRASS('r.neighbors', input='elev', output='avg', size=as.integer(9),
-          method='average', flags='overwrite')
+# NOTE:
+# bathy20_1 is a large raster. 
+# Better work on a sub-dataset to test the code first, 
+# once happy with the results on a sub-dataset run the analysis on the full dataset
+# this 2 lines will generate a sub-datset "minielev" with small extent and same resolution :
 
-execGRASS('r.neighbors', input='elev', output='min', size=as.integer(9),
-          method='minimum', flags='overwrite')
+execGRASS('g.region', raster='elev', res='20', w='580000',e='625000',s='7770000',n='7840000', flags=c('a','p')) 
+execGRASS('r.mapcalc', expression = 'minielev=elev', flags='overwrite') 
 
-execGRASS('r.neighbors', input='elev', output='max', size=as.integer(9),
-          method='maximum', flags='overwrite')
-
-#Elevation-relief ratio  
-execGRASS('r.mapcalc', expression = 'er=1.0*(avg-min)/(max-min)', flags='overwrite') 
-
-gc()       
-
-#slope, and normalized slope, using the raster package
-execGRASS('r.out.gdal', type='Float64', input="elev", output='elev.tif', flags='overwrite')
-elev <- raster('elev.tif')
-slope<-terrain(elev,opt=c('slope'),unit='degrees')
-xslope<-slope/74.82501              #divide by max slope
-
-#Profile curvature
-execGRASS('r.param.scale', input='elev', output='profc', size=as.integer(11),
-          slope_tolerance=0.1, curvature_tolerance=0.0001, method='profc', exponent=0.0, zscale=1.0, flags='overwrite')
-
-#Cross-sectional curvature 
-execGRASS('r.param.scale', input='elev', output='crosc', size=as.integer(11),
-          slope_tolerance=0.1, curvature_tolerance=0.0001, method='crosc', exponent=0.0, zscale=1.0, flags='overwrite')
-
-#Minimum curvature
-execGRASS('r.param.scale', input='elev', output='minic', size=as.integer(11),
-          slope_tolerance=0.1, curvature_tolerance=0.0001, method='minic', exponent=0.0, zscale=1.0, flags='overwrite')
-
-#Maximum curvature
-execGRASS('r.param.scale', input='elev', output='maxic', size=as.integer(11),
-          slope_tolerance=0.1, curvature_tolerance=0.0001, method='maxic', exponent=0.0, zscale=1.0, flags='overwrite')
-
-#Longitudinal curvature  
-execGRASS('r.param.scale', input='elev', output='longc', size=as.integer(11),
-          slope_tolerance=0.1, curvature_tolerance=0.0001, method='longc', exponent=0.0, zscale=1.0, flags='overwrite')                                                                                
-
-#export, import
-execGRASS('r.out.gdal', type='Float64', input="er", output='er.tif', flags='overwrite')
-er <- raster('er.tif')
-
-execGRASS('r.out.gdal', type='Float64', input="profc", output='profc.tif', flags='overwrite')
-profc <- raster('profc.tif')
-
-execGRASS('r.out.gdal', type='Float64', input="crosc", output='crosc.tif', flags='overwrite')
-crosc <- raster('crosc.tif')
-
-execGRASS('r.out.gdal', type='Float64', input="minic", output='minic.tif', flags='overwrite')
-minic <- raster('minic.tif')
-
-execGRASS('r.out.gdal', type='Float64', input="maxic", output='maxic.tif', flags='overwrite')
-maxic <- raster('maxic.tif')
-
-execGRASS('r.out.gdal', type='Float64', input="longc", output='longc.tif', flags='overwrite')
-longc <- raster('longc.tif')
-
-# stack
-s <- stack(er,xslope,profc,crosc,minic,maxic,longc)
-names(s) <- c('er','xslope','profc','crosc','minic','maxic','longc')
+source('morphoclara.R')
+s <- morphoclara(elevation='minielev', remove=TRUE)
 
 # we can't operate on the entire set of cells,
 # so we use one of the central concepts from statistics: sampling
@@ -88,6 +36,12 @@ s.r <- as.data.frame(sampleRegular(s, 10000))
 
 # clara() function: need to remove NA from training set
 s.r <- na.omit(s.r)
+
+# from :
+# list with silhouette width information for the best sample, see partition.object.
+#
+# https://stat.ethz.ch/R-manual/R-devel/library/cluster/html/partition.object.html
+# https://stat.ethz.ch/R-manual/R-devel/library/cluster/html/clara.object.html
 
 ncl <- numeric(8)
 for (i in 2:9) ncl[i] <- clara(s.r,stand=TRUE,k=i)$ silinfo $ avg.width
@@ -101,6 +55,16 @@ rf <- randomForest(cluster ~ er + xslope + profc + crosc + minic + maxic
 
 # make predictions from rf model, along all cells of input stack
 p <- predict(s, rf, type='response', progress='text')
+
+# variable importance: all contribute about the same... good
+#importance(rf)
+#varImpPlot(rf)
+
+# customized plot (needs an extra library)
+#par(mar=c(0,0,0,0))
+#plot(p, maxpixels=50000, axes=FALSE, legend=FALSE, col=brewer.pal('Set1', n=5))
+
+writeRaster(p, "TerClass_sub.asc", overwrite=TRUE)
 
 # variable importance: all contribute about the same... good
 #importance(rf)
